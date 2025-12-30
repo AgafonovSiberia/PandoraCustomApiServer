@@ -2,7 +2,7 @@
 name = "pandorawear"
 version = "0.1.0"
 description = "Add your description here"
-requires-python = ">=3.13"
+requires-python = "==3.13"
 dependencies = [
     "aiohttp==3.13.2",
     "aiokafka>=0.12.0",
@@ -14,7 +14,9 @@ dependencies = [
     "fastapi-cli==0.0.16",
     "fastapi[standard]==0.121.2",
     "myapplication>=0.1.0",
+    "psycopg>=3.2.12",
     "pydantic-settings>=2.11.0",
+    "pydevd-pycharm>=253.28086.55",
     "pyjwt>=2.10.1",
     "pytest==9.0.1",
     "redis>=7.0.1",

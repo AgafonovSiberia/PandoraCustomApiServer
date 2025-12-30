@@ -47,7 +47,7 @@ async def test_login_user_success(client: AsyncClient):
     login_resp = await client.post("/api/users/login", json=login_payload)
 
     assert login_resp.status_code in (codes.OK,)
-    assert "access_token" in login_resp.cookies
+    assert "access_token" in login_resp.json()
 
 
 @pytest.mark.asyncio
