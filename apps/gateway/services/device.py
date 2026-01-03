@@ -16,6 +16,9 @@ REFRESH_TOKEN_LEN = 32
 TOKEN_TTL = timedelta(days=60)
 TOKEN_CACHE_TTL_SECONDS = 60 * 60 * 2
 PAIR_CODE_TTL_SECONDS = 60
+LAST_USED_UPDATE_INTERVAL = timedelta(minutes=30)
+PAIR_KEY_PREFIX = "pair"
+DEVICE_KEY_PREFIX = "device"
 
 
 class DeviceService:
@@ -40,16 +43,12 @@ class DeviceService:
         return token_urlsafe(nbytes=REFRESH_TOKEN_LEN)
 
     @staticmethod
-    def _generate_access_token() -> str:
-        pass
-
-    @staticmethod
     def pair_code_key(code: str) -> str:
-        return f"pair:{code}"
+        return f"{PAIR_KEY_PREFIX}:{code}"
 
     @staticmethod
     def device_key(device_id: uuid.UUID | str) -> str:
-        return f"device:{str(device_id)}"
+        return f"{DEVICE_KEY_PREFIX}:{str(device_id)}"
 
     async def generate_pair_code(self, user_id: int, device_name: str) -> str:
         device = await self.device_repo.get_by_name(device_name=device_name)
@@ -95,14 +94,19 @@ class DeviceService:
 
     async def pair_by_code(self, pair_code: str) -> DevicePairDataOut:
         data = await self.cache.get_json(key=self.pair_code_key(code=pair_code))
-        if not data:
+        if not data or not isinstance(data, dict):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="INVALID_CODE")
 
-        user_id, device_name = data.get("user_id"), data.get("device_name")
+        user_id = data.get("user_id")
+        device_name = data.get("device_name")
+
+        if not user_id or not device_name:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="INVALID_CACHE_DATA")
+
         return await self._pair_device(device_name=device_name, user_id=user_id)
 
     async def device_revoke(self, device_id: uuid.UUID):
-        await self.cache.delete(key=str(device_id))
+        await self.cache.delete(key=self.device_key(device_id))
         await self.device_repo.delete_device(device_id)
 
     async def process_token(self, device_id: uuid.UUID, token: str) -> DeviceDomain:
@@ -110,23 +114,26 @@ class DeviceService:
         if from_cache and check_hashed_value(value=token, hashed_value=from_cache.encode(encoding="utf-8")):
             device = await self.device_repo.get(device_id=device_id)
             if device:
-                device_update = DeviceUpdate(
-                    id=device.id,
-                    last_used_at=datetime.now(UTC),
-                )
-                updated_device = await self.device_repo.update_device(device_update=device_update)
-                return updated_device
+                now = datetime.now(UTC)
+                if not device.last_used_at or (now - device.last_used_at > LAST_USED_UPDATE_INTERVAL):
+                    device_update = DeviceUpdate(
+                        id=device.id,
+                        last_used_at=now,
+                    )
+                    updated_device = await self.device_repo.update_device(device_update=device_update)
+                    return updated_device
+                return device
 
         device = await self.device_repo.get(device_id=device_id)
         if not device:
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="TOKEN_EXPIRED")
 
-        if device.token_hash != token:
+        if not check_hashed_value(value=token, hashed_value=device.token_hash):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="TOKEN_EXPIRED")
 
         # Пока что просто продлеваем токен сами
         new_expires_at = datetime.now(UTC) + TOKEN_TTL
-        await self.cache.set(self.device_key(device.id), str(device.token_hash))
+        await self.cache.set(self.device_key(device.id), device.token_hash.decode("utf-8"))
         device_update = DeviceUpdate(
             id=device.id,
             last_rotated_at=datetime.now(UTC),
@@ -136,14 +143,3 @@ class DeviceService:
         updated_device = await self.device_repo.update_device(device_update=device_update)
         return updated_device
 
-    async def verify_request(self, request: Request) -> DeviceDomain:
-        token = request.headers.get("Authorization")
-        if not token or not token.startswith("Bearer "):#
-            raise HTTPException(status_code=401, detail="Missing token")
-
-        cleaned_token = token.removeprefix("Bearer ").strip()
-        device_id = request.cookies.get("device_id")
-        if not device_id:
-            raise HTTPException(status_code=401, detail="Missing device_id")
-
-        return await self.process_token(device_id=uuid.UUID(device_id), token=cleaned_token)

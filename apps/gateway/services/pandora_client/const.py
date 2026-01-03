@@ -17,7 +17,7 @@ class AuthResponseField(StrEnum):
     USER_ID = "user_id"
 
 
-class URL:
+class PandoraEndpoints:
     host = "p-on.ru"
     base_url = "https://" + host
     login = "/api/users/login"

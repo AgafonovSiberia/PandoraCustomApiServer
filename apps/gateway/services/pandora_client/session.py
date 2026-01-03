@@ -28,28 +28,31 @@ class PandoraSession:
     def __init__(
         self,
         user_id: int,
-        cred: PandoraCredDomain,
+        credentials: PandoraCredDomain,
         cache: ICache,
+        http_session: ClientSession,
     ) -> None:
         self.user_id = user_id
-        self._cred = cred
+        self._credentials = credentials
         self._cache = cache
         self._session_id = None
+        self.http_session: ClientSession | None = http_session
 
-    def get_cache_key(self, user_id: int) -> str:
-        return f"{self.CACHE_PREFIX}{user_id}"
+    @property
+    def cache_key(self) -> str:
+        return f"{self.CACHE_PREFIX}{self.user_id}"
 
     async def _get_session_id_from_cache(self) -> str | None:
-        session_id = await self._cache.get(self.get_cache_key(user_id=self.user_id))
+        session_id = await self._cache.get(self.cache_key)
         return session_id or None
 
     async def _save_session_id_to_cache(self, session_id: str) -> None:
-        await self._cache.set(self.get_cache_key(user_id=self.user_id), session_id, ttl=self.SESSION_MAX_LIFETIME)
+        await self._cache.set(self.cache_key, session_id, ttl=self.SESSION_MAX_LIFETIME)
 
     async def _do_login_request(self) -> dict[str, Any]:
         payload = {
-            "login": self._cred.email,
-            "password": self._cred.password,
+            "login": self._credentials.email,
+            "password": self._credentials.password,
             "lang": "ru",
         }
         logger.error(f"[_do_login_request] - payload:{payload}")
